@@ -8,7 +8,7 @@ The main Python file, `INS_mech.py`, performs the following tasks:
 
 - **Data Loading:**  
   Loads MATLAB data files for:
-  - **Reference Data** (INS PVA):  
+  - **Reference Data** (INSPVA):  
     - `INS_second` – Time stamps  
     - `INS_Lat`, `INS_Long`, `INS_Alt` – Position data  
     - `INS_Roll`, `INS_Pitch`, `INS_Azi` – Attitude data  
@@ -21,8 +21,10 @@ The main Python file, `INS_mech.py`, performs the following tasks:
   - **Sample Time Data:**  
     - `sample_time` – Array of sample intervals  
   - **Odometer Data:**  
-    - `CarChip_second_1HZ` – Time stamps (approximately 1 Hz)  
+    - `CarChip_second_1HZ` – Time stamps (at 1 Hz)
+    - `CarChip_second_10HZ` – Time stamps (upsampled at 10 Hz)  
     - `CarChip_Speed_1HZ` – Odometer speed measurements (via OBD-II)
+    - `CarChip_Speed_10HZ` – Upsampled odometer speed measurements
 
 - **Data Synchronization:**  
   The script synchronizes the reference, IMU, and odometer datasets to a common overlapping time interval.
