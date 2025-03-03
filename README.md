@@ -1,6 +1,6 @@
 # Full INS Mechanization with Odometer/Speed Aiding
 
-This repository contains a validation script for an Inertial Navigation System (INS) mechanization algorithm using the Kingston 2008 dataset. The algorithm integrates inertial measurements and—optionally—fuses low-rate odometer speed measurements to update the INS velocity. **Note:** The odometer speed is acquired using the **OBD-II Vehicle Diagnostic protocol**, which is not as accurate as CAN-derived data or dedicated Distance Measuring Instruments (DMIs). See [arXiv](https://arxiv.org/abs/2501.00242)) for a comprehensive overview of automotive speed sensing technologies.
+This repository contains a validation script for an Inertial Navigation System (INS) mechanization algorithm using the Kingston 2008 dataset. The algorithm integrates inertial measurements and—optionally—fuses low-rate odometer speed measurements to update the INS velocity. **Note:** The odometer speed is acquired using the **OBD-II Vehicle Diagnostic protocol**, which is not as accurate as CAN-derived data or dedicated Distance Measuring Instruments (DMIs). See [arXiv](https://arxiv.org/abs/2501.00242) for a comprehensive overview of automotive speed sensing technologies.
 
 ## Overview
 
