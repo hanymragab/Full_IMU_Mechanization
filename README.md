@@ -140,4 +140,3 @@ python INS_mech.py
 ## Contact
 
 For any questions or further assistance, please contact me at [hany.ragab@queensu.ca].
-```
