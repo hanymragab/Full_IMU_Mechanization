@@ -82,8 +82,8 @@ pip install numpy scipy matplotlib
 Clone the repository:
 
 ```bash
-git clone https://github.com/hanymragab/Full_INS_Mechanization.git
-cd Full_INS_Mechanization
+git clone https://github.com/hanymragab/INSFullMech.git
+cd INSFullMech
 ```
 
 Place your MATLAB data files in the appropriate directories as referenced in the code (or update the file paths accordingly).
