@@ -87,27 +87,27 @@ class InitINS:
 
         print("Initial Rb_l matrix:\n", self._Rb_l)
 
-    def Init_Quatrenion(self):
+    def Init_Quaternion(self):
         """
         Computes the initial quaternion vector from the initial Rb_l matrix.
         """
         # Diagonal elements
         tr = 1 + self.rbl11 + self.rbl22 + self.rbl33
-        Fourth_Quatrenion = 0.5 * np.sqrt(tr)
-        First_Quatrenion  = 0.25 * (self.rbl32 - self.rbl23) / Fourth_Quatrenion
-        Second_Quatrenion = 0.25 * (self.rbl13 - self.rbl31) / Fourth_Quatrenion
-        Third_Quatrenion  = 0.25 * (self.rbl21 - self.rbl12) / Fourth_Quatrenion
+        Fourth_Quaternion = 0.5 * np.sqrt(tr)
+        First_Quaternion  = 0.25 * (self.rbl32 - self.rbl23) / Fourth_Quaternion
+        Second_Quaternion = 0.25 * (self.rbl13 - self.rbl31) / Fourth_Quaternion
+        Third_Quaternion  = 0.25 * (self.rbl21 - self.rbl12) / Fourth_Quaternion
 
-        self._Quatrenion = np.array([
-            First_Quatrenion,
-            Second_Quatrenion,
-            Third_Quatrenion,
-            Fourth_Quatrenion
+        self._Quaternion = np.array([
+            First_Quaternion,
+            Second_Quaternion,
+            Third_Quaternion,
+            Fourth_Quaternion
         ], dtype=float)
 
-        print("Initial Quaternion (raw):", self._Quatrenion)
-        self._Quatrenion /= np.linalg.norm(self._Quatrenion)  # Normalize
-        print("Initial Quaternion (normalized):", self._Quatrenion)
+        print("Initial Quaternion (raw):", self._Quaternion)
+        self._Quaternion /= np.linalg.norm(self._Quaternion)  # Normalize
+        print("Initial Quaternion (normalized):", self._Quaternion)
 
     def Init_Localg(self):
         """
@@ -134,7 +134,7 @@ class Mechanization(InitINS):
         super().__init__(latitude, longitude, altitude, roll, pitch, azimuth)
         # Initialize rotation matrix, quaternion, local gravity
         self.Init_Rbl()
-        self.Init_Quatrenion()
+        self.Init_Quaternion()
         self.Init_Localg()
 
         # Store states
@@ -221,19 +221,19 @@ class Mechanization(InitINS):
             [  -p,   -q,  -r,   0]
         ], dtype=float)
 
-    def UpdateQuatrenion(self):
+    def UpdateQuaternion(self):
         """
         Integrates the quaternion using the skew-symmetric matrix of body rates.
         """
-        Q_dot = 0.5 * (self._skewmatrix_wlb_b @ self._Quatrenion)
-        self._Quatrenion += self._delta_time * Q_dot
-        self._Quatrenion /= np.linalg.norm(self._Quatrenion)
+        Q_dot = 0.5 * (self._skewmatrix_wlb_b @ self._Quaternion)
+        self._Quaternion += self._delta_time * Q_dot
+        self._Quaternion /= np.linalg.norm(self._Quaternion)
 
     def UpdateRBL_Q(self):
         """
         Rebuilds the Rb_l matrix from the updated quaternion.
         """
-        q0, q1, q2, q3 = self._Quatrenion
+        q0, q1, q2, q3 = self._Quaternion
         self.rbl11 = q0**2 - q1**2 - q2**2 + q3**2
         self.rbl12 = 2*((q0*q1) - (q2*q3))
         self.rbl13 = 2*((q0*q2) + (q1*q3))
@@ -346,34 +346,55 @@ class Mechanization(InitINS):
         # dAlt
         self._altitude += half_dt*(vu + vu_prev)
 
-    def compile_standalone(self, wx, wy, wz, fx, fy, fz):
+    def compile_standalone(self, wx, wy, wz, fx, fy, fz, odometer_speed=None):
         """
         Performs one epoch of open-loop INS mechanization.
+        Optionally, if an odometer speed is available, the horizontal (East, North)
+        velocity is recomputed using the INS-derived azimuth such that its magnitude
+        exactly matches the odometer speed.
         """
-        # 1. Earth Radii
+        # 1. Compute Earth radii
         self.RadiiM()
         self.RadiiN()
-        # 2. Earth Rates
+        
+        # 2. Compute Earth rates and related matrices
         self.R_EL()
         self.WIE_L()
         self.WEL_L()
         self.WLB_B(wx, wy, wz)
         self.SkewMatrix_WLB_B()
-        # 3. Update Quaternions
-        self.UpdateQuatrenion()
-        # 4. Recompute Attitude
+        
+        # 3. Update quaternion
+        self.UpdateQuaternion()
+        
+        # 4. Update attitude based on updated quaternion
         self.UpdateRBL_Q()
         self.UpdateAttitude()
         self.CorrectAzimuth()
-        # 5. Update Velocity
+        
+        # 5. Update velocity using accelerometers and delta velocity
         self.OMEGA_IE_L()
         self.OMEGA_EL_L()
         self.UpdateAccelerometers(fx, fy, fz)
-        # self.UpdateG()  # If you'd like gravity updates each epoch
         self.UpdateDeltaVelocity()
         self.UpdateVelocity()
-        # 6. Update Position
+        
+        # -----------------------------
+        # Odometer integration logic:
+        # If an odometer speed is provided, assume it is the forward speed in the
+        # body frame. Form the body-frame velocity vector [odo_speed, 0, 0],
+        # transform it using the current rotation matrix, and update the INS velocity.
+        if odometer_speed is not None:
+            odo_body = np.array([odometer_speed, 0, 0])
+            # Transform to local-level frame using the body-to-local rotation matrix.
+            odo_local = self._Rb_l @ odo_body
+            self._vl[0] = odo_local[0]
+            self._vl[1] = odo_local[1]
+            self._vl[2] = odo_local[2]
+        
+        # 7. Update position using the (possibly odometer-corrected) velocity
         self.UpdatePosition()
+
 
     # -----------------------------------------------------------
     # Properties for direct access to states
@@ -527,6 +548,15 @@ def load_IMU_dataset(imu_file_path, IMU_CHOICE, Freq_INS):
     }
     return imu_data
 
+def load_ODO_dataset(odo_file_path):
+    data = sio.loadmat(odo_file_path)
+    odo_time  = data['CarChip_second_1HZ'].squeeze()
+    odo_speed = data['CarChip_Speed_1HZ'].squeeze()
+    return {
+        'time':  odo_time,
+        'speed': odo_speed
+    }
+
 def load_REF_dataset(ref_file_path, Freq_INS):
     """
     Loads and (possibly) downsamples the reference (INS) data.
@@ -584,17 +614,35 @@ def load_REF_dataset(ref_file_path, Freq_INS):
     }
     return ref_dict
 
-def synchronize_general(data, time_from, time_to):
-    """
-    Crops data dict so that data['time'] is within [time_from, time_to].
-    """
-    dt = data['time'][1] - data['time'][0]
+# def synchronize_general(data, time_from, time_to):
+#     """
+#     Crops data dict so that data['time'] is within [time_from, time_to].
+#     """
+#     dt = data['time'][1] - data['time'][0]
 
-    # Crop start
-    if (time_from - data['time'][0]) > dt:
+#     # Crop start
+#     if (time_from - data['time'][0]) > dt:
+#         start_idx = shift_calc(data['time'], time_from)
+#         for k in data.keys():
+#             data[k] = data[k][start_idx:]
+
+#     # Crop end
+#     if (data['time'][-1] - time_to) > dt:
+#         end_idx = shift_calc(data['time'], time_to) + 1
+#         for k in data.keys():
+#             data[k] = data[k][:end_idx]
+
+def synchronize_general(data, time_from, time_to):
+    dt = data['time'][1] - data['time'][0]
+    # Use >= instead of > to force cropping when difference equals dt
+    if (time_from - data['time'][0]) >= dt:
         start_idx = shift_calc(data['time'], time_from)
-        for k in data.keys():
+        for k in data:
             data[k] = data[k][start_idx:]
+    if (data['time'][-1] - time_to) >= dt:
+        end_idx = shift_calc(data['time'], time_to) + 1
+        for k in data:
+            data[k] = data[k][:end_idx]
 
     # Crop end
     if (data['time'][-1] - time_to) > dt:
@@ -602,7 +650,8 @@ def synchronize_general(data, time_from, time_to):
         for k in data.keys():
             data[k] = data[k][:end_idx]
 
-def syncronize_INS(ref_data, imu_data):
+
+def sync_INS(ref_data, imu_data):
     """
     Synchronizes reference and IMU data to the overlapping time region.
     """
@@ -617,6 +666,25 @@ def syncronize_INS(ref_data, imu_data):
 
     return ref_data, imu_data
 
+def syncronize_INS_ODO(ref_data, imu_data, odo_data):
+    """
+    Synchronizes reference, IMU, and ODO data all to the overlapping time region.
+    """
+    # 1. Find the common overlapping time interval among ref, IMU, and ODO
+    overall_start = max(ref_data['time'][0], imu_data['time'][0], odo_data['time'][0])
+    overall_end   = min(ref_data['time'][-1], imu_data['time'][-1], odo_data['time'][-1])
+
+    # 2. Crop each dataset to this interval
+    synchronize_general(ref_data, overall_start, overall_end)
+    synchronize_general(imu_data, overall_start, overall_end)
+    synchronize_general(odo_data, overall_start, overall_end)
+
+    print("After ODO sync:")
+    print("Ref =>", len(ref_data['time']), ref_data['time'][0], ref_data['time'][-1])
+    print("IMU =>", len(imu_data['time']), imu_data['time'][0], imu_data['time'][-1])
+    print("ODO =>", len(odo_data['time']), odo_data['time'][0], odo_data['time'][-1])
+
+    return ref_data, imu_data, odo_data
 # -----------------------------------------------------------------------------
 # 5. Plotting Utilities
 # -----------------------------------------------------------------------------
@@ -626,7 +694,7 @@ def plot_to_compare(sig_ref, time_ref, sig_imu, time_imu, title_text, ylabel, so
     time_imu_plot = (time_imu - time_imu.min())/60.0
 
     plt.plot(time_imu_plot, sig_imu, 'b', label=solution_label)
-    plt.plot(time_ref_plot, sig_ref, 'r--', label='Ref')
+    plt.plot(time_ref_plot, sig_ref, 'r--', label='Reference')
     plt.title(title_text)
     plt.xlabel('Time [mins]')
     plt.ylabel(ylabel)
@@ -656,7 +724,7 @@ def plot_error(sig_ref, time_ref, sig_imu, time_imu, title_text, ylabel, gps_out
 def plot_bi_trajectory(sig_ref, sig_imu, title_text, solution_label):
     fig = plt.figure(dpi=100, figsize=(7,4))
     plt.plot(sig_imu['lon'], sig_imu['lat'], 'b', label=solution_label)
-    plt.plot(sig_ref['lon'], sig_ref['lat'], 'r--', label='Ref')
+    plt.plot(sig_ref['lon'], sig_ref['lat'], 'r--', label='Reference')
     plt.title(title_text)
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
@@ -712,16 +780,27 @@ if __name__ == "__main__":
     imu_or_file_path  = r'.\2008-06-23_Downtown_Kingston\rover\Mat\RAWIMU_denoised_LOD3_interpolated2'
     imu_file_path     = r'.\2008-06-23_Downtown_Kingston\f_w_IMSseconds_dt.mat'
     sample_file_path  = r'.\2008-06-23_Downtown_Kingston\sample_time.mat'
+    odo_file_path     = r'C:\Users\hanym\OneDrive\Documents\INSfullMech-main\INSfullMech-main\2008-06-23_Downtown_Kingston\Sensors\CarChip_Speed_interpolated.mat'
 
     # Frequency and data loading
     Freq_INS = 10
     KVH      = 0  # IMU type
     ref_data = load_REF_dataset(ref_file_path, Freq_INS)
     IMU_data = load_IMU_dataset(imu_or_file_path, KVH, Freq_INS)
-
+    ODO_data = load_ODO_dataset(odo_file_path)
+    ODO_data_time = ODO_data['time']
+    ODO_data_speed = ODO_data['speed']
+    ref_data_speed = np.sqrt(ref_data['Ve']**2 + ref_data['Vn']**2 + ref_data['Vu']**2)
+    ref_data_time = ref_data['time']
+    plt.figure()
+    plt.plot(ref_data_time, ref_data_speed, color = 'red')
+    plt.plot(ODO_data_time, ODO_data_speed, 'go', markersize=2)
+    plt.show()
+    import pdb; pdb.set_trace()
     # Synchronize reference & IMU data
-    ref_data, IMU_data = syncronize_INS(ref_data, IMU_data)
-
+    # ref_data, IMU_data = sync_INS(ref_data, IMU_data)
+    ref_data, IMU_data, ODO_data = syncronize_INS_ODO(ref_data, IMU_data, ODO_data)
+    pdb.set_trace()
     # Display some info
     print("IMU first timestamp:", IMU_data['time'][0])
     print("Ref first timestamp:", ref_data['time'][0])
@@ -775,21 +854,44 @@ if __name__ == "__main__":
     Roll, Pitch, Azimuth = [Init_roll], [Init_pitch], [Init_azimuth]
     ve, vn, vu = [Init_ve], [Init_vn], [Init_vu]
 
+    # Initialize pointer for odometer data (ODO is 1Hz)
+    j_odo = 0
+    n_odo = len(ODO_data['time'])
+
     # Main Mechanization Loop
     for i in range(start, duration):
+        current_imu_time = IMU_data['time'][i]
+        print('IMU Time:', current_imu_time)
         wx = IMU_data['wx'][i]
         wy = IMU_data['wy'][i]
         wz = IMU_data['wz'][i]
         fx = IMU_data['fx'][i]
         fy = IMU_data['fy'][i]
         fz = IMU_data['fz'][i]
-
-        # Update delta_time from consecutive IMU stamps or sample_time array
         INS_Mechanize.delta_time = IMU_data['time'][i] - IMU_data['time'][i - 1]
         # INS_Mechanize.delta_time = sample_time_new[i]  # If you prefer this approach
 
-        # Mechanize
-        INS_Mechanize.compile_standalone(wx, wy, wz, fx, fy, fz)
+        # Check if odometer data is available at this IMU time:
+        odo_value = None
+        # While the next odometer sample is less than or equal to current IMU time, update odo_value.
+        while j_odo < n_odo and ODO_data['time'][j_odo] <= current_imu_time:
+            odo_value = ODO_data['speed'][j_odo]
+            j_odo += 1
+
+        if odo_value is not None:
+            print("ODO Speed available at IMU time:", odo_value)
+            # You can pass odo_value to your mechanization if you want to incorporate it.
+            # For example:
+            INS_Mechanize.compile_standalone(wx, wy, wz, fx, fy, fz, odometer_speed = odo_value)
+            # Otherwise, if not used, simply print or process as needed.
+        else:
+            # No new ODO sample at this epoch
+            # Mechanize
+            INS_Mechanize.compile_standalone(wx, wy, wz, fx, fy, fz, odometer_speed = odo_value)
+        # Update delta_time from consecutive IMU stamps or sample_time array
+        
+
+        
 
         # Store results
         Lat.append(INS_Mechanize.latitude)
@@ -836,6 +938,23 @@ if __name__ == "__main__":
     imu_data_mechanized['vu']     = vu
     ref_data_trimmed['vu']        = ref_data['Vu'][Initial:duration]
 
+    pdb.set_trace()
+    ve_list = imu_data_mechanized['ve']  # Python list
+    vn_list = imu_data_mechanized['vn']
+    vu_list = imu_data_mechanized['vu']
+
+    # Convert to NumPy arrays
+    ve = np.array(ve_list, dtype=float)
+    vn = np.array(vn_list, dtype=float)
+    vu = np.array(vu_list, dtype=float)
+
+    imu_data_mechanized_speed = np.sqrt(ve**2 + vn**2 + vu**2)
+    imu_data_mechanized_time = imu_data_mechanized['time']
+
+    plt.figure()
+    plt.plot(ref_data_time, ref_data_speed, color = 'red')
+    plt.plot(imu_data_mechanized_time, imu_data_mechanized_speed, 'go', markersize=2)
+    plt.show()
     # Print some checks
     print("IMU first timestamp (mechanized):", imu_data_mechanized['time'][0])
     print("REF first timestamp (trimmed):", ref_data_trimmed['time'][0])
